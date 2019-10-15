@@ -2,12 +2,10 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Sockets;
-using Apache.Hadoop.Hbase.Thrift;
+using Microsoft.HBase.Client;
+using org.apache.hadoop.hbase.rest.protobuf.generated;
 using S2.BlackSwan.SupplyCollector;
 using S2.BlackSwan.SupplyCollector.Models;
-using Thrift.Protocol;
-using Thrift.Transport;
-using Thrift.Transport.Client;
 
 namespace HBaseSupplyCollector
 {
@@ -23,7 +21,7 @@ namespace HBaseSupplyCollector
             return $"{PREFIX}{host}:{port}";
         }
 
-        private Hbase.Client Connect(string connectString)
+        private HBaseClient Connect(string connectString)
         {
             if (!connectString.StartsWith(PREFIX))
                 throw new ArgumentException("Invalid connection string!");
@@ -33,25 +31,23 @@ namespace HBaseSupplyCollector
             var host = parts[0];
             var port = Int32.Parse(parts[1]);
 
-            var client = new TcpClient(host, port);
-            var socket = new TSocketTransport(client);
-            var transport = new TBufferedTransport(socket);
-            var protocol = new TBinaryProtocol(transport);
-            return new Hbase.Client(protocol);
+            var credentials = new ClusterCredentials(new Uri($"http://{host}:{port}"), "anonymous", "");
+
+            return new HBaseClient(credentials);
         }
 
         public override List<string> CollectSample(DataEntity dataEntity, int sampleSize) {
             var results = new List<string>();
 
             using (var conn = Connect(dataEntity.Container.ConnectionString)) {
-                var scanId = conn.scannerOpenAsync(dataEntity.Collection.Name.ToUtf8Bytes(), new byte[] { },
-                    new List<byte[]>() {dataEntity.Name.ToUtf8Bytes()}, new Dictionary<byte[], byte[]>()).Result;
+                var scan = conn.CreateScannerAsync(dataEntity.Collection.Name,
+                    new Scanner() {filter = dataEntity.Name}, new RequestOptions()).Result;
 
-                var rows = conn.scannerGetListAsync(scanId, sampleSize).Result;
+                var rows = conn.ScannerGetNextAsync(scan, new RequestOptions()).Result;
 
-                foreach (var row in rows) {
-                    foreach (var rowColumn in row.Columns) {
-                        results.Add(rowColumn.Value.Value.ToUtf8String());
+                foreach (var row in rows.rows) {
+                    foreach (var rowColumn in row.values) {
+                        results.Add(rowColumn.data.ToUtf8String());
                     }
                 }
             }
@@ -59,7 +55,7 @@ namespace HBaseSupplyCollector
             return results;
         }
 
-        private long getRowCount(Hbase.Client conn, byte[] tableName) {
+        private long getRowCount(HBaseClient conn, string tableName) {
             return 0;
         }
 
@@ -68,11 +64,11 @@ namespace HBaseSupplyCollector
 
             using (var conn = Connect(container.ConnectionString))
             {
-                var tables = conn.getTableNamesAsync().Result;
+                var tables = conn.ListTablesAsync().Result;
 
-                foreach (var table in tables) {
+                foreach (var table in tables.name) {
                     metrics.Add(new DataCollectionMetrics() {
-                        Name = table.ToUtf8String(),
+                        Name = table,
                         RowCount = getRowCount(conn, table)
                     });
                 }
@@ -86,16 +82,16 @@ namespace HBaseSupplyCollector
             var entities = new List<DataEntity>();
 
             using (var conn = Connect(container.ConnectionString)) {
-                var tables = conn.getTableNamesAsync().Result;
+                var tables = conn.ListTablesAsync().Result;
 
-                foreach (var table in tables) {
-                    var collection = new DataCollection(container, table.ToUtf8String());
+                foreach (var table in tables.name) {
+                    var collection = new DataCollection(container, table);
                     collections.Add(collection);
 
-                    var columns = conn.getColumnDescriptorsAsync(table).Result;
-                    foreach (var column in columns) {
+                    var schema = conn.GetTableSchemaAsync(table).Result;
+                    foreach (var column in schema.columns) {
                         entities.Add(new DataEntity(
-                            column.Value.Name.ToUtf8String(),
+                            column.name,
                             DataType.String, "string", container, collection
                             ));
                     }
@@ -108,7 +104,7 @@ namespace HBaseSupplyCollector
         public override bool TestConnection(DataContainer container) {
             try {
                 using (var conn = Connect(container.ConnectionString)) {
-                    conn.getTableNamesAsync().Wait();
+                    conn.ListTablesAsync().Wait();
                 }
 
                 return true;

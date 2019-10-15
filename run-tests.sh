@@ -3,7 +3,7 @@ docker run --name hbase -d dajobe/hbase
 sleep 20
 
 export HBASE_HOST=localhost
-export HBASE_PORT=9090
+export HBASE_PORT=8080
 
 dotnet build
 dotnet test

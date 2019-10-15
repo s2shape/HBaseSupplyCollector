@@ -2,14 +2,12 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Net.Sockets;
-using Apache.Hadoop.Hbase.Thrift;
+using System.Security.Cryptography.X509Certificates;
 using HBaseSupplyCollector;
+using Microsoft.HBase.Client;
+using org.apache.hadoop.hbase.rest.protobuf.generated;
 using S2.BlackSwan.SupplyCollector.Models;
 using SupplyCollectorDataLoader;
-using Thrift.Protocol;
-using Thrift.Transport;
-using Thrift.Transport.Client;
 
 namespace HBaseSupplyCollectorLoader
 {
@@ -17,7 +15,7 @@ namespace HBaseSupplyCollectorLoader
     {
         private const string PREFIX = "hbase://";
 
-        private Hbase.Client Connect(string connectString)
+        private HBaseClient Connect(string connectString)
         {
             if (!connectString.StartsWith(PREFIX))
                 throw new ArgumentException("Invalid connection string!");
@@ -27,11 +25,11 @@ namespace HBaseSupplyCollectorLoader
             var host = parts[0];
             var port = Int32.Parse(parts[1]);
 
-            var client = new TcpClient(host, port);
-            var socket = new TSocketTransport(client);
-            var transport = new TBufferedTransport(socket);
-            var protocol = new TBinaryProtocol(transport);
-            return new Hbase.Client(protocol);
+            Console.WriteLine($"Connecting to http://{host}:{port}");
+
+            var credentials = new ClusterCredentials(new Uri($"http://{host}:{port}"), "anonymous", "");
+
+            return new HBaseClient(credentials);
         }
 
         public override void InitializeDatabase(DataContainer dataContainer) {
@@ -40,15 +38,20 @@ namespace HBaseSupplyCollectorLoader
 
         public override void LoadSamples(DataEntity[] dataEntities, long count) {
             using (var connect = Connect(dataEntities[0].Container.ConnectionString)) {
-                var tableName = dataEntities[0].Collection.Name.ToUtf8Bytes();
+                var tableName = dataEntities[0].Collection.Name;
 
-                var columns = dataEntities.Select(x => new ColumnDescriptor() {
-                    Name = x.Name.ToUtf8Bytes(),
-                    InMemory = false,
-                    MaxVersions = 1
-                }).ToList();
+                var schema = new TableSchema() {
+                    name = tableName,
+                    inMemory = false
+                };
 
-                connect.createTableAsync(tableName, columns).Wait();
+                schema.columns.AddRange(
+                    dataEntities.Select(x => new ColumnSchema() {
+                        name = x.Name,
+                        maxVersions = 1
+                    }));
+
+                connect.CreateTableAsync(schema).Wait();
 
                 var columnNames = dataEntities.Select(x => x.Name.ToUtf8Bytes()).ToList();
 
@@ -59,64 +62,93 @@ namespace HBaseSupplyCollectorLoader
                         Console.Write(".");
                     }
 
-                    var values = new List<byte[]>();
-                    foreach (var dataEntity in dataEntities) {
-                        switch (dataEntity.DataType)
-                        {
-                            case DataType.String:
-                                values.Add(new Guid().ToString().ToUtf8Bytes());
-                                break;
-                            case DataType.Int:
-                                values.Add(r.Next().ToString().ToUtf8Bytes());
-                                break;
-                            case DataType.Double:
-                                values.Add(r.NextDouble().ToString().Replace(",", ".").ToUtf8Bytes());
-                                break;
-                            case DataType.Boolean:
-                                values.Add(r.Next(100) > 50 ? "true".ToUtf8Bytes() : "false".ToUtf8Bytes());
-                                break;
-                            case DataType.DateTime:
-                                var val = DateTimeOffset
-                                    .FromUnixTimeMilliseconds(
-                                        DateTimeOffset.Now.ToUnixTimeMilliseconds() + r.Next()).DateTime;
-                                
-                                values.Add(val.ToString("s").ToUtf8Bytes());
-                                
-                                break;
-                            default:
-                                values.Add(r.Next().ToString().ToUtf8Bytes());
-                                break;
+                    var cellSet = new CellSet();
+                    for (int i = 0; i < 100; i++) {
+                        var row = new CellSet.Row { key = Guid.NewGuid().ToString().ToUtf8Bytes() };
+
+                        foreach (var dataEntity in dataEntities) {
+                            switch (dataEntity.DataType) {
+                                case DataType.String:
+                                    row.values.Add(new Cell() {
+                                        column = dataEntity.Name.ToUtf8Bytes(),
+                                        data = new Guid().ToString().ToUtf8Bytes()
+                                    });
+                                    break;
+                                case DataType.Int:
+                                    row.values.Add(new Cell()
+                                    {
+                                        column = dataEntity.Name.ToUtf8Bytes(),
+                                        data = r.Next().ToString().ToUtf8Bytes()
+                                    });
+                                    break;
+                                case DataType.Double:
+                                    row.values.Add(new Cell()
+                                    {
+                                        column = dataEntity.Name.ToUtf8Bytes(),
+                                        data = r.NextDouble().ToString().Replace(",", ".").ToUtf8Bytes()
+                                    });
+                                    break;
+                                case DataType.Boolean:
+                                    row.values.Add(new Cell()
+                                    {
+                                        column = dataEntity.Name.ToUtf8Bytes(),
+                                        data = r.Next(100) > 50 ? "true".ToUtf8Bytes() : "false".ToUtf8Bytes()
+                                    });
+                                    break;
+                                case DataType.DateTime:
+                                    var val = DateTimeOffset
+                                        .FromUnixTimeMilliseconds(
+                                            DateTimeOffset.Now.ToUnixTimeMilliseconds() + r.Next()).DateTime;
+
+                                    row.values.Add(new Cell()
+                                    {
+                                        column = dataEntity.Name.ToUtf8Bytes(),
+                                        data = val.ToString("s").ToUtf8Bytes()
+                                    });
+
+                                    break;
+                                default:
+                                    row.values.Add(new Cell()
+                                    {
+                                        column = dataEntity.Name.ToUtf8Bytes(),
+                                        data = r.Next().ToString().ToUtf8Bytes()
+                                    });
+                                    break;
+                            }
                         }
+
+                        cellSet.rows.Add(row);
                     }
 
-                    connect.appendAsync(new TAppend() {
-                        Row = Guid.NewGuid().ToString().ToUtf8Bytes(),
-                        Columns = columnNames,
-                        Table = tableName,
-                        Values = values
-                    }).Wait();
-
-                    rows++;
+                    connect.StoreCellsAsync(tableName, cellSet).Wait();
+                    rows += 100;
                 }
 
                 Console.WriteLine();
             }
         }
 
-        private void LoadTable(Hbase.Client connect, string tableName, string filePath) {
+        private void LoadTable(HBaseClient connect, string tableName, string filePath) {
             using (var reader = new StreamReader(filePath)) {
                 var header = reader.ReadLine();
                 var columnsNames = header.Split(",");
 
-                var columns = columnsNames.Select(x => new ColumnDescriptor()
+                var schema = new TableSchema()
                 {
-                    Name = x.ToUtf8Bytes(),
-                    InMemory = false,
-                    MaxVersions = 1
-                }).ToList();
+                    name = tableName,
+                    inMemory = false
+                };
 
-                connect.createTableAsync(tableName.ToUtf8Bytes(), columns).Wait();
+                schema.columns.AddRange(
+                    columnsNames.Select(x => new ColumnSchema()
+                    {
+                        name = x,
+                        maxVersions = 1
+                    }));
 
+                connect.CreateTableAsync(schema).Wait();
+
+                var cellSet = new CellSet();
                 while (!reader.EndOfStream) {
                     var line = reader.ReadLine();
                     if(String.IsNullOrEmpty(line))
@@ -124,14 +156,19 @@ namespace HBaseSupplyCollectorLoader
 
                     var cells = line.Split(",");
 
-                    connect.appendAsync(new TAppend()
-                    {
-                        Row = Guid.NewGuid().ToString().ToUtf8Bytes(),
-                        Columns = columnsNames.Select(x => x.ToUtf8Bytes()).ToList(),
-                        Table = tableName.ToUtf8Bytes(),
-                        Values = cells.Select(x => x.ToUtf8Bytes()).ToList()
-                    }).Wait();
+                    var row = new CellSet.Row { key = Guid.NewGuid().ToString().ToUtf8Bytes() };
+                    for (int i = 0; i < cells.Length && i < columnsNames.Length; i++) {
+                        row.values.Add(new Cell()
+                        {
+                            column = columnsNames[i].ToUtf8Bytes(),
+                            data = cells[i].ToUtf8Bytes()
+                        });
+                    }
+
+                    cellSet.rows.Add(row);
                 }
+
+                connect.StoreCellsAsync(tableName, cellSet).Wait();
             }
         }
 
