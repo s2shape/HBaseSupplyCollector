@@ -7,6 +7,7 @@ stages:
 variables:
   HBASE_HOST: hbase
   HBASE_PORT: "8080"
+  COMPlus_DebugWriteToStdErr: "1"
 
 before_script:
   - dotnet restore -s https://www.myget.org/F/s2/ -s https://api.nuget.org/v3/index.json

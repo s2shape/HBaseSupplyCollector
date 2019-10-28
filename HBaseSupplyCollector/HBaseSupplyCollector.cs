@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net.Sockets;
 using Microsoft.HBase.Client;
+using Microsoft.HBase.Client.LoadBalancing;
+using Microsoft.Practices.EnterpriseLibrary.TransientFaultHandling;
 using org.apache.hadoop.hbase.rest.protobuf.generated;
 using S2.BlackSwan.SupplyCollector;
 using S2.BlackSwan.SupplyCollector.Models;
@@ -15,6 +17,7 @@ namespace HBaseSupplyCollector
         }
 
         private const string PREFIX = "hbase://";
+        private RequestOptions _globalRequestOptions;
 
         public string BuildConnectionString(string host, int port)
         {
@@ -32,6 +35,18 @@ namespace HBaseSupplyCollector
             var port = Int32.Parse(parts[1]);
 
             var credentials = new ClusterCredentials(new Uri($"http://{host}:{port}"), "anonymous", "");
+            _globalRequestOptions = new RequestOptions()
+            {
+                Port = port,
+                RetryPolicy = RetryPolicy.NoRetry,
+                KeepAlive = true,
+                TimeoutMillis = 30000,
+                ReceiveBufferSize = 1024 * 1024 * 1,
+                SerializationBufferSize = 1024 * 1024 * 1,
+                UseNagle = false,
+                AlternativeEndpoint = Constants.RestEndpointBase,
+                AlternativeHost = null
+            };
 
             return new HBaseClient(credentials);
         }
@@ -41,9 +56,9 @@ namespace HBaseSupplyCollector
 
             using (var conn = Connect(dataEntity.Container.ConnectionString)) {
                 var scan = conn.CreateScannerAsync(dataEntity.Collection.Name,
-                    new Scanner() {filter = dataEntity.Name}, new RequestOptions()).Result;
+                    new Scanner() {filter = dataEntity.Name}, _globalRequestOptions).Result;
 
-                var rows = conn.ScannerGetNextAsync(scan, new RequestOptions()).Result;
+                var rows = conn.ScannerGetNextAsync(scan, _globalRequestOptions).Result;
 
                 foreach (var row in rows.rows) {
                     foreach (var rowColumn in row.values) {
@@ -64,7 +79,7 @@ namespace HBaseSupplyCollector
 
             using (var conn = Connect(container.ConnectionString))
             {
-                var tables = conn.ListTablesAsync().Result;
+                var tables = conn.ListTablesAsync(_globalRequestOptions).Result;
 
                 foreach (var table in tables.name) {
                     metrics.Add(new DataCollectionMetrics() {
@@ -82,13 +97,13 @@ namespace HBaseSupplyCollector
             var entities = new List<DataEntity>();
 
             using (var conn = Connect(container.ConnectionString)) {
-                var tables = conn.ListTablesAsync().Result;
+                var tables = conn.ListTablesAsync(_globalRequestOptions).Result;
 
                 foreach (var table in tables.name) {
                     var collection = new DataCollection(container, table);
                     collections.Add(collection);
 
-                    var schema = conn.GetTableSchemaAsync(table).Result;
+                    var schema = conn.GetTableSchemaAsync(table, _globalRequestOptions).Result;
                     foreach (var column in schema.columns) {
                         entities.Add(new DataEntity(
                             column.name,
@@ -104,7 +119,7 @@ namespace HBaseSupplyCollector
         public override bool TestConnection(DataContainer container) {
             try {
                 using (var conn = Connect(container.ConnectionString)) {
-                    conn.ListTablesAsync().Wait();
+                    conn.ListTablesAsync(_globalRequestOptions).Wait();
                 }
 
                 return true;

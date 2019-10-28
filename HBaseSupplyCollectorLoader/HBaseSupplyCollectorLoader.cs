@@ -5,6 +5,8 @@ using System.Linq;
 using System.Security.Cryptography.X509Certificates;
 using HBaseSupplyCollector;
 using Microsoft.HBase.Client;
+using Microsoft.HBase.Client.LoadBalancing;
+using Microsoft.Practices.EnterpriseLibrary.TransientFaultHandling;
 using org.apache.hadoop.hbase.rest.protobuf.generated;
 using S2.BlackSwan.SupplyCollector.Models;
 using SupplyCollectorDataLoader;
@@ -14,6 +16,7 @@ namespace HBaseSupplyCollectorLoader
     public class HBaseSupplyCollectorLoader : SupplyCollectorDataLoaderBase
     {
         private const string PREFIX = "hbase://";
+        private RequestOptions _globalRequestOptions;
 
         private HBaseClient Connect(string connectString)
         {
@@ -28,6 +31,17 @@ namespace HBaseSupplyCollectorLoader
             Console.WriteLine($"Connecting to http://{host}:{port}");
 
             var credentials = new ClusterCredentials(new Uri($"http://{host}:{port}"), "anonymous", "");
+            _globalRequestOptions = new RequestOptions() {
+                Port = port,
+                RetryPolicy = RetryPolicy.NoRetry,
+                KeepAlive = true,
+                TimeoutMillis = 30000,
+                ReceiveBufferSize = 1024 * 1024 * 1,
+                SerializationBufferSize = 1024 * 1024 * 1,
+                UseNagle = false,
+                AlternativeEndpoint = "/", //Constants.RestEndpointBase,
+                AlternativeHost = null
+            };
 
             return new HBaseClient(credentials);
         }
@@ -51,7 +65,7 @@ namespace HBaseSupplyCollectorLoader
                         maxVersions = 1
                     }));
 
-                connect.CreateTableAsync(schema).Wait();
+                connect.CreateTableAsync(schema, _globalRequestOptions).Wait();
 
                 var columnNames = dataEntities.Select(x => x.Name.ToUtf8Bytes()).ToList();
 
@@ -120,7 +134,7 @@ namespace HBaseSupplyCollectorLoader
                         cellSet.rows.Add(row);
                     }
 
-                    connect.StoreCellsAsync(tableName, cellSet).Wait();
+                    connect.StoreCellsAsync(tableName, cellSet, _globalRequestOptions).Wait();
                     rows += 100;
                 }
 
@@ -146,7 +160,7 @@ namespace HBaseSupplyCollectorLoader
                         maxVersions = 1
                     }));
 
-                connect.CreateTableAsync(schema).Wait();
+                connect.CreateTableAsync(schema, _globalRequestOptions).Wait();
 
                 var cellSet = new CellSet();
                 while (!reader.EndOfStream) {
@@ -168,7 +182,7 @@ namespace HBaseSupplyCollectorLoader
                     cellSet.rows.Add(row);
                 }
 
-                connect.StoreCellsAsync(tableName, cellSet).Wait();
+                connect.StoreCellsAsync(tableName, cellSet, _globalRequestOptions).Wait();
             }
         }
 
