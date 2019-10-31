@@ -5,11 +5,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.HBase.Client.Core" Version="0.2.0.4" />
     <PackageReference Include="S2.SupplyCollector" Version="1.1.1" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\..\HbaseRest\Microsoft.HBase.Client\Microsoft.HBase.Client.csproj" />
   </ItemGroup>
 
 </Project>

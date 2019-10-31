@@ -42,19 +42,6 @@ namespace HBaseSupplyCollectorLoader
                 TimeoutMillis = 30000,
                 ReceiveBufferSize = 1024 * 1024 * 1,
                 SerializationBufferSize = 1024 * 1024 * 1,
-                RequestSerializerType = RequestSerializerType.Protobuf,
-                UseNagle = false,
-                AlternativeEndpoint = "/", //Constants.RestEndpointBase,
-                AlternativeHost = null
-            };
-            _globalXmlRequestOptions = new RequestOptions() {
-                Port = port,
-                RetryPolicy = RetryPolicy.NoRetry,
-                KeepAlive = true,
-                TimeoutMillis = 30000,
-                ReceiveBufferSize = 1024 * 1024 * 1,
-                SerializationBufferSize = 1024 * 1024 * 1,
-                RequestSerializerType = RequestSerializerType.None,
                 UseNagle = false,
                 AlternativeEndpoint = "/", //Constants.RestEndpointBase,
                 AlternativeHost = null
