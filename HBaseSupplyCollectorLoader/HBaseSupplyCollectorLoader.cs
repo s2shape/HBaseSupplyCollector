@@ -1,8 +1,11 @@
 ﻿using System;
+using System.Buffers.Text;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Security.Cryptography.X509Certificates;
+using System.Text;
 using HBaseSupplyCollector;
 using Microsoft.HBase.Client;
 using Microsoft.HBase.Client.LoadBalancing;
@@ -17,6 +20,7 @@ namespace HBaseSupplyCollectorLoader
     {
         private const string PREFIX = "hbase://";
         private RequestOptions _globalRequestOptions;
+        private RequestOptions _globalXmlRequestOptions;
 
         private HBaseClient Connect(string connectString)
         {
@@ -38,6 +42,19 @@ namespace HBaseSupplyCollectorLoader
                 TimeoutMillis = 30000,
                 ReceiveBufferSize = 1024 * 1024 * 1,
                 SerializationBufferSize = 1024 * 1024 * 1,
+                RequestSerializerType = RequestSerializerType.Protobuf,
+                UseNagle = false,
+                AlternativeEndpoint = "/", //Constants.RestEndpointBase,
+                AlternativeHost = null
+            };
+            _globalXmlRequestOptions = new RequestOptions() {
+                Port = port,
+                RetryPolicy = RetryPolicy.NoRetry,
+                KeepAlive = true,
+                TimeoutMillis = 30000,
+                ReceiveBufferSize = 1024 * 1024 * 1,
+                SerializationBufferSize = 1024 * 1024 * 1,
+                RequestSerializerType = RequestSerializerType.None,
                 UseNagle = false,
                 AlternativeEndpoint = "/", //Constants.RestEndpointBase,
                 AlternativeHost = null
@@ -134,7 +151,7 @@ namespace HBaseSupplyCollectorLoader
                         cellSet.rows.Add(row);
                     }
 
-                    connect.StoreCellsAsync(tableName, cellSet, _globalRequestOptions).Wait();
+                    connect.StoreCellsAsync(tableName, cellSet, _globalXmlRequestOptions).Wait();
                     rows += 100;
                 }
 
@@ -162,27 +179,44 @@ namespace HBaseSupplyCollectorLoader
 
                 connect.CreateTableAsync(schema, _globalRequestOptions).Wait();
 
-                var cellSet = new CellSet();
                 while (!reader.EndOfStream) {
                     var line = reader.ReadLine();
                     if(String.IsNullOrEmpty(line))
                         continue;
 
+                    var cellSet = new CellSet();
                     var cells = line.Split(",");
 
                     var row = new CellSet.Row { key = Guid.NewGuid().ToString().ToUtf8Bytes() };
                     for (int i = 0; i < cells.Length && i < columnsNames.Length; i++) {
-                        row.values.Add(new Cell()
+                        var cell = new Cell()
                         {
-                            column = columnsNames[i].ToUtf8Bytes(),
+                            column = (columnsNames[i] + ":columnname").ToUtf8Bytes(),
                             data = cells[i].ToUtf8Bytes()
-                        });
+                        };
+
+                        row.values.Add(cell);
                     }
-
                     cellSet.rows.Add(row);
-                }
 
-                connect.StoreCellsAsync(tableName, cellSet, _globalRequestOptions).Wait();
+                    try
+                    {
+                        connect.StoreCellsAsync(tableName, cellSet, _globalRequestOptions).Wait();
+                    }
+                    catch (Exception ex)
+                    {
+                        if (ex.InnerException != null && ex.InnerException is WebException)
+                        {
+                            var resp = (ex.InnerException as WebException).Response as HttpWebResponse;
+                            string msg;
+                            using (var sr = new StreamReader(resp.GetResponseStream()))
+                            {
+                                msg = sr.ReadToEnd();
+                            }
+                            throw new Exception(msg, ex);
+                        }
+                    }
+                }
             }
         }
 

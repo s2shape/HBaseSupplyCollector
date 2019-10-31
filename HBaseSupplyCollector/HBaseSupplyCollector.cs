@@ -44,7 +44,7 @@ namespace HBaseSupplyCollector
                 ReceiveBufferSize = 1024 * 1024 * 1,
                 SerializationBufferSize = 1024 * 1024 * 1,
                 UseNagle = false,
-                AlternativeEndpoint = Constants.RestEndpointBase,
+                AlternativeEndpoint = "/",
                 AlternativeHost = null
             };
 
@@ -56,14 +56,35 @@ namespace HBaseSupplyCollector
 
             using (var conn = Connect(dataEntity.Container.ConnectionString)) {
                 var scan = conn.CreateScannerAsync(dataEntity.Collection.Name,
-                    new Scanner() {filter = dataEntity.Name}, _globalRequestOptions).Result;
+                    new Scanner() {
+                        batch = 10,
+                        columns = { dataEntity.Name.ToUtf8Bytes() }
+                        //filter = "{\"type\": \"ColumnPrefixFilter\", \"value\": \""  + Convert.ToBase64String((dataEntity.Name).ToUtf8Bytes()) + "\" }" 
+                    }, _globalRequestOptions).Result;
 
-                var rows = conn.ScannerGetNextAsync(scan, _globalRequestOptions).Result;
+                try {
+                    while (true) {
+                        var rows = conn.ScannerGetNextAsync(scan, _globalRequestOptions).Result;
 
-                foreach (var row in rows.rows) {
-                    foreach (var rowColumn in row.values) {
-                        results.Add(rowColumn.data.ToUtf8String());
+                        if (rows == null || rows.rows.Count == 0) {
+                            break;
+                        }
+
+                        foreach (var row in rows.rows) {
+                            foreach (var rowColumn in row.values) {
+                                results.Add(rowColumn.data.ToUtf8String());
+
+                                if (results.Count >= sampleSize)
+                                    break;
+                            }
+                        }
+
+                        if (results.Count >= sampleSize)
+                            break;
                     }
+                }
+                finally {
+                    conn.DeleteScannerAsync(dataEntity.Collection.Name, scan, _globalRequestOptions).Wait();
                 }
             }
 

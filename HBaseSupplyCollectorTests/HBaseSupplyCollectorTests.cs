@@ -44,7 +44,7 @@ namespace HBaseSupplyCollectorTests
             var (tables, elements) = _instance.GetSchema(_container);
 
             Assert.Equal(1, tables.Count);
-            Assert.Equal(40, elements.Count);
+            Assert.Equal(39, elements.Count);
             foreach (DataEntity element in elements)
             {
                 Assert.NotEqual(string.Empty, element.DbDataType);
@@ -60,7 +60,6 @@ namespace HBaseSupplyCollectorTests
             Assert.Equal(200, samples.Count);
             Assert.Contains("qa25@example.com", samples);
         }
-
 
     }
 }
