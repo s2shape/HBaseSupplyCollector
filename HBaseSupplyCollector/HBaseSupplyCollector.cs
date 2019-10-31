@@ -77,6 +77,9 @@ namespace HBaseSupplyCollector
                                 if (results.Count >= sampleSize)
                                     break;
                             }
+
+                            if (results.Count >= sampleSize)
+                                break;
                         }
 
                         if (results.Count >= sampleSize)

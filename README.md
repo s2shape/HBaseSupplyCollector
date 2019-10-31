@@ -9,5 +9,6 @@ Run `./run-tests.sh`
 
 ## Known issues
 - no support for metrics
-- random sampling doesn't work
+- random sampling doesn't work - think about RandomRowFilter()
+- modified/debug version of rest library is used
 
