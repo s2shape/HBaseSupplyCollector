@@ -34,6 +34,10 @@ test:
     - cd $ROOT_PROJECT_PATH
     - dotnet test
 
+  except:
+    changes:
+      - "*.md"
+
 load_test:
   stage: test
   services:
@@ -48,6 +52,10 @@ load_test:
     - cp -f /SupplyCollectorDataLoader/SupplyCollectorDataLoader/bin/Debug/netcoreapp2.2/SupplyCollectorDataLoader.runtimeconfig.json .
     - dotnet SupplyCollectorDataLoader.dll -init HBaseSupplyCollector hbase://$HBASE_HOST:$HBASE_PORT
     - dotnet SupplyCollectorDataLoader.dll -xunit HBaseSupplyCollector hbase://$HBASE_HOST:$HBASE_PORT
-    - dotnet SupplyCollectorDataLoader.dll -samples HBaseSupplyCollector hbase://$HBASE_HOST:$HBASE_PORT TestCollection Test1:int,Test2:string,Test3:bool,Test4:double,Test5 1000000
+    - dotnet SupplyCollectorDataLoader.dll -samples HBaseSupplyCollector hbase://$HBASE_HOST:$HBASE_PORT TestCollection Test1:int,Test2:string,Test3:bool,Test4:double,Test5 100000
     - cd $ROOT_PROJECT_PATH/HBaseSupplyCollectorTests/bin/Debug/netcoreapp2.2/publish
     - SupplyCollectorTestHarness
+
+  except:
+    changes:
+      - "*.md"

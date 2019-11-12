@@ -20,7 +20,6 @@ namespace HBaseSupplyCollectorLoader
     {
         private const string PREFIX = "hbase://";
         private RequestOptions _globalRequestOptions;
-        private RequestOptions _globalXmlRequestOptions;
 
         private HBaseClient Connect(string connectString)
         {
@@ -55,95 +54,89 @@ namespace HBaseSupplyCollectorLoader
         }
 
         public override void LoadSamples(DataEntity[] dataEntities, long count) {
-            using (var connect = Connect(dataEntities[0].Container.ConnectionString)) {
-                var tableName = dataEntities[0].Collection.Name;
+            var connect = Connect(dataEntities[0].Container.ConnectionString);
+            var tableName = dataEntities[0].Collection.Name;
 
-                var schema = new TableSchema() {
-                    name = tableName,
-                    inMemory = false
-                };
+            var schema = new TableSchema() {
+                name = tableName,
+                inMemory = false
+            };
 
-                schema.columns.AddRange(
-                    dataEntities.Select(x => new ColumnSchema() {
-                        name = x.Name,
-                        maxVersions = 1
-                    }));
+            schema.columns.AddRange(
+                dataEntities.Select(x => new ColumnSchema() {
+                    name = x.Name,
+                    maxVersions = 1
+                }));
 
-                connect.CreateTableAsync(schema, _globalRequestOptions).Wait();
+            AsyncHelpers.RunSync(() => connect.CreateTableAsync(schema, _globalRequestOptions));
 
-                var columnNames = dataEntities.Select(x => x.Name.ToUtf8Bytes()).ToList();
+            var columnNames = dataEntities.Select(x => x.Name.ToUtf8Bytes()).ToList();
 
-                var r = new Random();
-                long rows = 0;
-                while (rows < count) {
-                    if (rows % 1000 == 0) {
-                        Console.Write(".");
-                    }
-
-                    var cellSet = new CellSet();
-                    for (int i = 0; i < 100; i++) {
-                        var row = new CellSet.Row { key = Guid.NewGuid().ToString().ToUtf8Bytes() };
-
-                        foreach (var dataEntity in dataEntities) {
-                            switch (dataEntity.DataType) {
-                                case DataType.String:
-                                    row.values.Add(new Cell() {
-                                        column = dataEntity.Name.ToUtf8Bytes(),
-                                        data = new Guid().ToString().ToUtf8Bytes()
-                                    });
-                                    break;
-                                case DataType.Int:
-                                    row.values.Add(new Cell()
-                                    {
-                                        column = dataEntity.Name.ToUtf8Bytes(),
-                                        data = r.Next().ToString().ToUtf8Bytes()
-                                    });
-                                    break;
-                                case DataType.Double:
-                                    row.values.Add(new Cell()
-                                    {
-                                        column = dataEntity.Name.ToUtf8Bytes(),
-                                        data = r.NextDouble().ToString().Replace(",", ".").ToUtf8Bytes()
-                                    });
-                                    break;
-                                case DataType.Boolean:
-                                    row.values.Add(new Cell()
-                                    {
-                                        column = dataEntity.Name.ToUtf8Bytes(),
-                                        data = r.Next(100) > 50 ? "true".ToUtf8Bytes() : "false".ToUtf8Bytes()
-                                    });
-                                    break;
-                                case DataType.DateTime:
-                                    var val = DateTimeOffset
-                                        .FromUnixTimeMilliseconds(
-                                            DateTimeOffset.Now.ToUnixTimeMilliseconds() + r.Next()).DateTime;
-
-                                    row.values.Add(new Cell()
-                                    {
-                                        column = dataEntity.Name.ToUtf8Bytes(),
-                                        data = val.ToString("s").ToUtf8Bytes()
-                                    });
-
-                                    break;
-                                default:
-                                    row.values.Add(new Cell()
-                                    {
-                                        column = dataEntity.Name.ToUtf8Bytes(),
-                                        data = r.Next().ToString().ToUtf8Bytes()
-                                    });
-                                    break;
-                            }
-                        }
-
-                        cellSet.rows.Add(row);
-                    }
-
-                    connect.StoreCellsAsync(tableName, cellSet, _globalXmlRequestOptions).Wait();
-                    rows += 100;
+            var r = new Random();
+            long rows = 0;
+            while (rows < count) {
+                if (rows % 1000 == 0) {
+                    Console.Write(".");
                 }
 
-                Console.WriteLine();
+                var cellSet = new CellSet();
+                for (int i = 0; i < 100; i++) {
+                    var row = new CellSet.Row {key = Guid.NewGuid().ToString().ToUtf8Bytes()};
+
+                    foreach (var dataEntity in dataEntities) {
+                        switch (dataEntity.DataType) {
+                            case DataType.String:
+                                row.values.Add(new Cell() {
+                                    column = (dataEntity.Name + ":columnname").ToUtf8Bytes(),
+                                    data = new Guid().ToString().ToUtf8Bytes()
+                                });
+                                break;
+                            case DataType.Int:
+                                row.values.Add(new Cell() {
+                                    column = (dataEntity.Name + ":columnname").ToUtf8Bytes(),
+                                    data = r.Next().ToString().ToUtf8Bytes()
+                                });
+                                break;
+                            case DataType.Double:
+                                row.values.Add(new Cell() {
+                                    column = (dataEntity.Name + ":columnname").ToUtf8Bytes(),
+                                    data = r.NextDouble().ToString().Replace(",", ".").ToUtf8Bytes()
+                                });
+                                break;
+                            case DataType.Boolean:
+                                row.values.Add(new Cell() {
+                                    column = (dataEntity.Name + ":columnname").ToUtf8Bytes(),
+                                    data = r.Next(100) > 50 ? "true".ToUtf8Bytes() : "false".ToUtf8Bytes()
+                                });
+                                break;
+                            case DataType.DateTime:
+                                var val = DateTimeOffset
+                                    .FromUnixTimeMilliseconds(
+                                        DateTimeOffset.Now.ToUnixTimeMilliseconds() + r.Next()).DateTime;
+
+                                row.values.Add(new Cell() {
+                                    column = (dataEntity.Name + ":columnname").ToUtf8Bytes(),
+                                    data = val.ToString("s").ToUtf8Bytes()
+                                });
+
+                                break;
+                            default:
+                                row.values.Add(new Cell() {
+                                    column = (dataEntity.Name + ":columnname").ToUtf8Bytes(),
+                                    data = r.Next().ToString().ToUtf8Bytes()
+                                });
+                                break;
+                        }
+                    }
+
+                    cellSet.rows.Add(row);
+                }
+
+                AsyncHelpers.RunSync(() => connect.StoreCellsAsync(tableName, cellSet, _globalRequestOptions));
+                rows += 100;
             }
+
+            Console.WriteLine();
         }
 
         private void LoadTable(HBaseClient connect, string tableName, string filePath) {
@@ -164,7 +157,7 @@ namespace HBaseSupplyCollectorLoader
                         maxVersions = 1
                     }));
 
-                connect.CreateTableAsync(schema, _globalRequestOptions).Wait();
+                AsyncHelpers.RunSync(() => connect.CreateTableAsync(schema, _globalRequestOptions));
 
                 while (!reader.EndOfStream) {
                     var line = reader.ReadLine();
@@ -188,7 +181,7 @@ namespace HBaseSupplyCollectorLoader
 
                     try
                     {
-                        connect.StoreCellsAsync(tableName, cellSet, _globalRequestOptions).Wait();
+                        AsyncHelpers.RunSync(() => connect.StoreCellsAsync(tableName, cellSet, _globalRequestOptions));
                     }
                     catch (Exception ex)
                     {

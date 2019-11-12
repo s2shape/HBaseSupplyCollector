@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Sockets;
+using System.Threading.Tasks;
 using Microsoft.HBase.Client;
 using Microsoft.HBase.Client.LoadBalancing;
 using Microsoft.Practices.EnterpriseLibrary.TransientFaultHandling;
@@ -52,19 +53,23 @@ namespace HBaseSupplyCollector
         }
 
         public override List<string> CollectSample(DataEntity dataEntity, int sampleSize) {
+            return AsyncHelpers.RunSync(() => CollectSampleAsync(dataEntity, sampleSize));
+        }
+
+        public async Task<List<string>> CollectSampleAsync(DataEntity dataEntity, int sampleSize) {
             var results = new List<string>();
 
             using (var conn = Connect(dataEntity.Container.ConnectionString)) {
-                var scan = conn.CreateScannerAsync(dataEntity.Collection.Name,
+                var scan = await conn.CreateScannerAsync(dataEntity.Collection.Name,
                     new Scanner() {
                         batch = 10,
                         columns = { dataEntity.Name.ToUtf8Bytes() }
                         //filter = "{\"type\": \"ColumnPrefixFilter\", \"value\": \""  + Convert.ToBase64String((dataEntity.Name).ToUtf8Bytes()) + "\" }" 
-                    }, _globalRequestOptions).Result;
+                    }, _globalRequestOptions).ConfigureAwait(false);
 
                 try {
                     while (true) {
-                        var rows = conn.ScannerGetNextAsync(scan, _globalRequestOptions).Result;
+                        var rows = await conn.ScannerGetNextAsync(scan, _globalRequestOptions).ConfigureAwait(false);
 
                         if (rows == null || rows.rows.Count == 0) {
                             break;
@@ -87,7 +92,7 @@ namespace HBaseSupplyCollector
                     }
                 }
                 finally {
-                    conn.DeleteScannerAsync(dataEntity.Collection.Name, scan, _globalRequestOptions).Wait();
+                    await conn.DeleteScannerAsync(dataEntity.Collection.Name, scan, _globalRequestOptions).ConfigureAwait(false);
                 }
             }
 
@@ -98,12 +103,17 @@ namespace HBaseSupplyCollector
             return 0;
         }
 
-        public override List<DataCollectionMetrics> GetDataCollectionMetrics(DataContainer container) {
+        public override List<DataCollectionMetrics> GetDataCollectionMetrics(DataContainer container)
+        {
+            return AsyncHelpers.RunSync(() => GetDataCollectionMetricsAsync(container));
+        }
+
+        public async Task<List<DataCollectionMetrics>> GetDataCollectionMetricsAsync(DataContainer container) {
             var metrics = new List<DataCollectionMetrics>();
 
             using (var conn = Connect(container.ConnectionString))
             {
-                var tables = conn.ListTablesAsync(_globalRequestOptions).Result;
+                var tables = await conn.ListTablesAsync(_globalRequestOptions).ConfigureAwait(false);
 
                 foreach (var table in tables.name) {
                     metrics.Add(new DataCollectionMetrics() {
@@ -117,17 +127,21 @@ namespace HBaseSupplyCollector
         }
 
         public override (List<DataCollection>, List<DataEntity>) GetSchema(DataContainer container) {
+            return AsyncHelpers.RunSync(() => GetSchemaAsync(container));
+        }
+
+        public async Task<(List<DataCollection>, List<DataEntity>)> GetSchemaAsync(DataContainer container) {
             var collections = new List<DataCollection>();
             var entities = new List<DataEntity>();
 
             using (var conn = Connect(container.ConnectionString)) {
-                var tables = conn.ListTablesAsync(_globalRequestOptions).Result;
+                var tables = await conn.ListTablesAsync(_globalRequestOptions).ConfigureAwait(false);
 
                 foreach (var table in tables.name) {
                     var collection = new DataCollection(container, table);
                     collections.Add(collection);
 
-                    var schema = conn.GetTableSchemaAsync(table, _globalRequestOptions).Result;
+                    var schema = await conn.GetTableSchemaAsync(table, _globalRequestOptions).ConfigureAwait(false);
                     foreach (var column in schema.columns) {
                         entities.Add(new DataEntity(
                             column.name,
@@ -141,9 +155,13 @@ namespace HBaseSupplyCollector
         }
 
         public override bool TestConnection(DataContainer container) {
+            return AsyncHelpers.RunSync(() => TestConnectionAsync(container));
+        }
+
+        public async Task<bool> TestConnectionAsync(DataContainer container) {
             try {
                 using (var conn = Connect(container.ConnectionString)) {
-                    conn.ListTablesAsync(_globalRequestOptions).Wait();
+                    await conn.ListTablesAsync(_globalRequestOptions).ConfigureAwait(false);
                 }
 
                 return true;
